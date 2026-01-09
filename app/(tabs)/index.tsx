@@ -1,98 +1,289 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { View, Text, TouchableOpacity, StyleSheet, Animated } from "react-native";
+import { useState, useRef, useEffect } from "react";
+import { Audio } from "expo-av";
+import ConfettiCannon from "react-native-confetti-cannon";
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const [board, setBoard] = useState<string[]>(Array(9).fill(""));
+  const [isXTurn, setIsXTurn] = useState(true);
+  const [winner, setWinner] = useState<string | null>(null);
+  const [showConfetti, setShowConfetti] = useState(false);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  // 🏆 Score
+  const [score, setScore] = useState({ X: 0, O: 0 });
+
+  // 🎬 Animations
+  const scaleAnim = useRef(Array(9).fill(0).map(() => new Animated.Value(1))).current;
+  const scoreAnim = useRef(new Animated.Value(1)).current;
+
+  // 🔊 Sounds
+  const clickSound = useRef<Audio.Sound | null>(null);
+  const winSound = useRef<Audio.Sound | null>(null);
+
+  useEffect(() => {
+    loadSounds();
+    return () => {
+      unloadSounds().then(() => {});
+    };
+  }, []);
+
+  const loadSounds = async () => {
+    clickSound.current = new Audio.Sound();
+    winSound.current = new Audio.Sound();
+
+    await clickSound.current.loadAsync(
+      require("../../assets/click.mp3")
+    );
+    await winSound.current.loadAsync(
+      require("../../assets/win.mp3")
+    );
+  };
+
+  const unloadSounds = async () => {
+    await clickSound.current?.unloadAsync();
+    await winSound.current?.unloadAsync();
+  };
+
+  const playClick = async () => {
+    await clickSound.current?.replayAsync();
+  };
+
+  const playWin = async () => {
+    await winSound.current?.replayAsync();
+  };
+
+  // 🤖 Simple AI (O plays)
+  const aiMove = (currentBoard: string[]) => {
+    const emptyIndexes = currentBoard
+      .map((v, i) => (v === "" ? i : null))
+      .filter(v => v !== null) as number[];
+  
+    if (emptyIndexes.length === 0 || winner) return;
+  
+    const randomIndex =
+      emptyIndexes[Math.floor(Math.random() * emptyIndexes.length)];
+  
+    const newBoard = [...currentBoard];
+    newBoard[randomIndex] = "O";
+  
+    setBoard(newBoard);
+  
+    checkWinner(newBoard);
+  };
+  
+
+  const checkWinner = (newBoard: string[]) => {
+    const lines = [
+      [0,1,2],[3,4,5],[6,7,8],
+      [0,3,6],[1,4,7],[2,5,8],
+      [0,4,8],[2,4,6],
+    ];
+  
+    for (let [a,b,c] of lines) {
+      if (
+        newBoard[a] &&
+        newBoard[a] === newBoard[b] &&
+        newBoard[a] === newBoard[c]
+      ) {
+        setWinner(newBoard[a]);
+        onWin(newBoard[a]);
+        return newBoard[a];   // 👈 return winner
+      }
+    }
+  
+    if (!newBoard.includes("")) {
+      setWinner("Draw");
+      return "Draw";
+    }
+  
+    return null;
+  };
+  
+
+  const onWin = async (player: string) => {
+    setShowConfetti(true);
+    playWin();
+
+    setScore(prev => ({
+      ...prev,
+      [player]: prev[player as "X" | "O"] + 1,
+    }));
+
+    animateScore();
+  };
+
+  const animateScore = () => {
+    Animated.sequence([
+      Animated.timing(scoreAnim, {
+        toValue: 1.3,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scoreAnim, {
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const animateCell = (index: number) => {
+    Animated.sequence([
+      Animated.timing(scaleAnim[index], {
+        toValue: 0.8,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim[index], {
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const handlePress = (index: number) => {
+    // ❌ stop if cell filled or game over
+    if (board[index] || winner) return;
+  
+    playClick();
+    animateCell(index);
+  
+    const newBoard = [...board];
+    newBoard[index] = "X";
+  
+    setBoard(newBoard);
+  
+    // check if player won
+    const result = checkWinner(newBoard);
+    if (result) return;
+  
+    // 🤖 AI MOVE after small delay
+    setTimeout(() => {
+      aiMove(newBoard);
+    }, 600);
+  };
+  
+
+  const resetGame = () => {
+    setBoard(Array(9).fill(""));
+    setWinner(null);
+    setIsXTurn(true);
+    setShowConfetti(false);
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Tic Tac Toe</Text>
+
+      {/* 🏆 Scoreboard */}
+      <Animated.View style={[styles.scoreBox, { transform: [{ scale: scoreAnim }] }]}>
+        <Text style={styles.scoreText}>X: {score.X}</Text>
+        <Text style={styles.scoreText}>O: {score.O}</Text>
+      </Animated.View>
+
+      <Text style={styles.turnText}>
+        {winner
+          ? winner === "Draw"
+            ? "It's a Draw!"
+            : `Winner: ${winner}`
+          : `Turn: ${isXTurn ? "X" : "O"} (You: X, AI: O)`}
+      </Text>
+
+      {/* 🎮 Board */}
+      <View style={styles.board}>
+        {board.map((value, index) => (
+          <TouchableOpacity
+            key={index}
+            style={styles.cellWrapper}
+            onPress={() => handlePress(index)}
+            activeOpacity={0.7}
+          >
+            <Animated.View
+              style={[
+                styles.cell,
+                { transform: [{ scale: scaleAnim[index] }] },
+              ]}
+            >
+              <Text style={styles.cellText}>{value}</Text>
+            </Animated.View>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* 🔄 Reset */}
+      <TouchableOpacity style={styles.resetBtn} onPress={resetGame}>
+        <Text style={styles.resetText}>Restart</Text>
+      </TouchableOpacity>
+
+      {/* 🎉 Confetti */}
+      {showConfetti && (
+        <ConfettiCannon
+          count={150}
+          origin={{ x: 200, y: 0 }}
+          fadeOut
+        />
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flex: 1,
+    backgroundColor: "#FFF5E6",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  title: {
+    fontSize: 28,
+    fontWeight: "bold",
+    marginBottom: 10,
+    color: "#9A4020",
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  scoreBox: {
+    flexDirection: "row",
+    gap: 20,
+    marginBottom: 10,
+  },
+  scoreText: {
+    fontSize: 20,
+    fontWeight: "bold",
+  },
+  turnText: {
+    fontSize: 16,
+    marginBottom: 15,
+  },
+  board: {
+    width: 300,
+    height: 300,
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  cellWrapper: {
+    width: "33.33%",
+    height: "33.33%",
+  },
+  cell: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#333",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff",
+  },
+  cellText: {
+    fontSize: 36,
+    fontWeight: "bold",
+  },
+  resetBtn: {
+    marginTop: 25,
+    backgroundColor: "#9A4020",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 6,
+  },
+  resetText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
   },
 });
