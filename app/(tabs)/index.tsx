@@ -141,7 +141,6 @@ export default function HomeScreen() {
   };
 
   const handlePress = (index: number) => {
-    // ❌ stop if cell filled or game over
     if (board[index] || winner) return;
   
     playClick();
